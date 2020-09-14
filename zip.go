@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"sync"
@@ -89,6 +88,10 @@ func main() {
 	bucketname := *buckets.Buckets[0].Name
 	objects := listObjects(bucketname)
 	wg := sync.WaitGroup{}
+	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
+	if fileErr != nil {
+		panic(fileErr)
+	}
 	wg.Add(2)
 	go func() {
 		defer func() {
@@ -114,14 +117,8 @@ func main() {
 	}()
 	go func() {
 		defer wg.Done()
-
 		result := pr
-
-		body, err := ioutil.ReadAll(result)
-		if err != nil {
-			panic(err)
-		}
-		err = ioutil.WriteFile("downloaded/zipped_txt_file.zip", body, 0644)
+		_, err := io.Copy(f, result)
 		if err != nil {
 			panic(err)
 		}
