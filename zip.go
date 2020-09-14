@@ -2,10 +2,10 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -60,6 +60,18 @@ func listObjects(bucketname string) (resp *s3.ListObjectsV2Output) {
 	return resp
 }
 
+func getObject(bucketname string, key string) (resp *s3.GetObjectOutput) {
+	resp, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucketname),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		panic(err)
+	}
+	return resp
+}
+
 type FakeWriterAt struct {
 	w io.Writer
 }
@@ -82,48 +94,91 @@ func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutp
 }
 
 func main() {
-	pr, pw := io.Pipe()
-	zipWriter := zip.NewWriter(pw)
-	buckets := listBuckets()
-	bucketname := *buckets.Buckets[0].Name
-	objects := listObjects(bucketname)
-	wg := sync.WaitGroup{}
 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
 	if fileErr != nil {
 		panic(fileErr)
 	}
+	zipWriter := zip.NewWriter(f)
+
+	downloadChannel := make(chan []byte)
+	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() {
+
+	go handleFileDownload(downloadChannel, &wg, "zip-examples", "test1.txt")
+	func() {
 		defer func() {
 			wg.Done()
 			zipWriter.Close()
-			pw.Close()
 		}()
-
-		for _, obj := range objects.Contents {
-			file := &s3.GetObjectInput{
-				Bucket: aws.String(bucketname),
-				Key:    aws.String(*obj.Key),
-			}
-			w, err := zipWriter.Create(path.Base(*file.Key))
-			if err != nil {
-				panic(err)
-			}
-			_, downloadErr := downloader.Download(FakeWriterAt{w}, file)
-			if downloadErr != nil {
-				panic(downloadErr)
-			}
+		fmt.Println("filename: ", f.Name())
+		fw, zipErr := zipWriter.Create("test.txt")
+		if zipErr != nil {
+			panic(zipErr)
+		}
+		for b := range downloadChannel {
+			fw.Write(b)
 		}
 	}()
-	go func() {
-		defer wg.Done()
-		result := pr
-		_, err := io.Copy(f, result)
-		if err != nil {
-			panic(err)
-		}
 
-	}()
 	wg.Wait()
-
 }
+
+func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, key string) {
+	defer func() {
+		wg.Done()
+		close(dc)
+	}()
+	buf := bytes.NewBuffer(make([]byte, 0, 50001000))
+	fmt.Println("Downloading... ", key)
+	obj := getObject(bucketname, key)
+	io.Copy(buf, obj.Body)
+
+	dc <- buf.Bytes()
+}
+
+// func main() {
+// 	pr, pw := io.Pipe()
+// 	zipWriter := zip.NewWriter(pw)
+// 	buckets := listBuckets()
+// 	bucketname := *buckets.Buckets[0].Name
+// 	objects := listObjects(bucketname)
+// 	wg := sync.WaitGroup{}
+// 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
+// 	if fileErr != nil {
+// 		panic(fileErr)
+// 	}
+// 	wg.Add(2)
+// 	go func() {
+// 		defer func() {
+// 			wg.Done()
+// 			zipWriter.Close()
+// 			pw.Close()
+// 		}()
+
+// 		for _, obj := range objects.Contents {
+// 			file := &s3.GetObjectInput{
+// 				Bucket: aws.String(bucketname),
+// 				Key:    aws.String(*obj.Key),
+// 			}
+// 			w, err := zipWriter.Create(path.Base(*file.Key))
+// 			if err != nil {
+// 				panic(err)
+// 			}
+// 			_, downloadErr := downloader.Download(FakeWriterAt{w}, file)
+// 			if downloadErr != nil {
+// 				panic(downloadErr)
+// 			}
+// 		}
+// 	}()
+// 	go func() {
+// 		defer wg.Done()
+// 		result := pr
+// 		_, err := io.Copy(f, result)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+
+// 	}()
+// 	wg.Wait()
+
+// }
