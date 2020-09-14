@@ -1,8 +1,13 @@
 package main
 
 import (
+	"archive/zip"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"os"
+	"path"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -56,8 +61,85 @@ func listObjects(bucketname string) (resp *s3.ListObjectsV2Output) {
 	return resp
 }
 
+// func getObject(w io.WriterAt, bucketname string, filename string) {
+// 	fmt.Println("Downloading: ", filename)
+
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	body, err := ioutil.ReadAll(resp.Body)
+// 	err = ioutil.WriteFile("downloaded/"+filename, body, 0644)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// }
+type FakeWriterAt struct {
+	w io.Writer
+}
+
+func (fw FakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
+	return fw.w.Write(p)
+}
+
+func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutput) {
+	fmt.Println("Deleting... ", filename)
+	resp, err := svc.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucketname),
+		Key:    aws.String(filename),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return resp
+}
+
 func main() {
+	pr, pw := io.Pipe()
+	zipWriter := zip.NewWriter(pw)
 	buckets := listBuckets()
-	objects := listObjects(*buckets.Buckets[0].Name)
-	fmt.Println(objects.Contents)
+	bucketname := *buckets.Buckets[0].Name
+	objects := listObjects(bucketname)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer func() {
+			wg.Done()
+			zipWriter.Close()
+			pw.Close()
+		}()
+
+		for _, obj := range objects.Contents {
+			file := &s3.GetObjectInput{
+				Bucket: aws.String(bucketname),
+				Key:    aws.String(*obj.Key),
+			}
+			w, err := zipWriter.Create(path.Base(*file.Key))
+			if err != nil {
+				panic(err)
+			}
+			_, downloadErr := downloader.Download(FakeWriterAt{w}, file)
+			if downloadErr != nil {
+				panic(downloadErr)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+
+		result := pr
+
+		body, err := ioutil.ReadAll(result)
+		if err != nil {
+			panic(err)
+		}
+		err = ioutil.WriteFile("downloaded/zipped_txt_file.zip", body, 0644)
+		if err != nil {
+			panic(err)
+		}
+
+	}()
+	wg.Wait()
+
 }
