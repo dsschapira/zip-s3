@@ -61,19 +61,6 @@ func listObjects(bucketname string) (resp *s3.ListObjectsV2Output) {
 	return resp
 }
 
-// func getObject(w io.WriterAt, bucketname string, filename string) {
-// 	fmt.Println("Downloading: ", filename)
-
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	body, err := ioutil.ReadAll(resp.Body)
-// 	err = ioutil.WriteFile("downloaded/"+filename, body, 0644)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// }
 type FakeWriterAt struct {
 	w io.Writer
 }
