@@ -97,7 +97,11 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer func() {
+			zipWriter.Close()
+			f.Close()
+			wg.Done()
+		}()
 		chans = make([]chan []byte, len(files))
 		for i := 0; i < len(files); i++ {
 			ch := make(chan []byte)
@@ -129,7 +133,6 @@ func handleZipAdd(zc reflect.Value, zw *zip.Writer, wg *sync.WaitGroup, filename
 	wg.Add(1)
 	defer func() {
 		wg.Done()
-		zw.Close()
 	}()
 	fmt.Println("Creating file: ", filename)
 	fw, zipErr := zw.Create(filename)
