@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -93,26 +94,26 @@ func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutp
 	return resp
 }
 
-func oldMain() {
-	files := []string{"test1.txt", "test2.txt"}
+// func oldMain() {
+// 	files := []string{"test1.txt", "test2.txt"}
 
-	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
-	if fileErr != nil {
-		panic(fileErr)
-	}
-	zipWriter := zip.NewWriter(f)
+// 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
+// 	if fileErr != nil {
+// 		panic(fileErr)
+// 	}
+// 	zipWriter := zip.NewWriter(f)
 
-	downloadChannel := make(chan []byte)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	func() {
-		defer wg.Done()
-		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
-		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
-	}()
+// 	downloadChannel := make(chan []byte)
+// 	var wg sync.WaitGroup
+// 	wg.Add(1)
+// 	func() {
+// 		defer wg.Done()
+// 		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
+// 		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
+// 	}()
 
-	wg.Wait()
-}
+// 	wg.Wait()
+// }
 
 func main() {
 	files := []string{"test1.txt", "test2.txt"}
@@ -123,32 +124,49 @@ func main() {
 	}
 	zipWriter := zip.NewWriter(f)
 
-	downloadChannel := make(chan []byte)
+	var chans []chan []byte
 	var wg sync.WaitGroup
 	wg.Add(1)
-	func() {
+	go func() {
 		defer wg.Done()
-		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
-		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
+		for i := 0; i < len(files); i++ {
+			ch := make(chan []byte)
+			chans = append(chans, ch)
+			go handleFileDownload(ch, &wg, "zip-examples", files[i])
+		}
+
+		cases := make([]reflect.SelectCase, len(chans))
+		for i, ch := range chans {
+			cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+		}
+		remaining := len(cases)
+		for remaining > 0 {
+			chosen, value, ok := reflect.Select(cases)
+			if !ok {
+				// The chosen channel has been closed, so zero out the chanel to disable the case
+				cases[chosen].Chan = reflect.ValueOf(nil)
+				remaining -= 1
+				continue
+			}
+			handleZipAdd(value, *zipWriter, &wg, files[chosen])
+		}
 	}()
 
 	wg.Wait()
-
 }
 
-func handleZipAdd(zc chan []byte, zw *zip.Writer, wg *sync.WaitGroup, filename string) {
+func handleZipAdd(zc reflect.Value, zw zip.Writer, wg *sync.WaitGroup, filename string) {
 	wg.Add(1)
 	defer func() {
 		wg.Done()
 		zw.Close()
 	}()
+	fmt.Println("Creating file: ", filename)
 	fw, zipErr := zw.Create(filename)
 	if zipErr != nil {
 		panic(zipErr)
 	}
-	for b := range zc {
-		fw.Write(b)
-	}
+	fw.Write(zc.Bytes())
 }
 
 func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, key string) {
@@ -161,7 +179,7 @@ func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, k
 	fmt.Println("Downloading... ", key)
 	obj := getObject(bucketname, key)
 	io.Copy(buf, obj.Body)
-
+	fmt.Printf("Write to channel %#v\n", dc)
 	dc <- buf.Bytes()
 }
 
