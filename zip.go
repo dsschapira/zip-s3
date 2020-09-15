@@ -93,6 +93,27 @@ func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutp
 	return resp
 }
 
+func oldMain() {
+	files := []string{"test1.txt", "test2.txt"}
+
+	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
+	if fileErr != nil {
+		panic(fileErr)
+	}
+	zipWriter := zip.NewWriter(f)
+
+	downloadChannel := make(chan []byte)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	func() {
+		defer wg.Done()
+		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
+		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
+	}()
+
+	wg.Wait()
+}
+
 func main() {
 	files := []string{"test1.txt", "test2.txt"}
 
@@ -112,6 +133,7 @@ func main() {
 	}()
 
 	wg.Wait()
+
 }
 
 func handleZipAdd(zc chan []byte, zw *zip.Writer, wg *sync.WaitGroup, filename string) {
