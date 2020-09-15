@@ -94,6 +94,8 @@ func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutp
 }
 
 func main() {
+	files := []string{"test1.txt", "test2.txt"}
+
 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
 	if fileErr != nil {
 		panic(fileErr)
@@ -102,28 +104,33 @@ func main() {
 
 	downloadChannel := make(chan []byte)
 	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go handleFileDownload(downloadChannel, &wg, "zip-examples", "test1.txt")
+	wg.Add(1)
 	func() {
-		defer func() {
-			wg.Done()
-			zipWriter.Close()
-		}()
-		fmt.Println("filename: ", f.Name())
-		fw, zipErr := zipWriter.Create("test.txt")
-		if zipErr != nil {
-			panic(zipErr)
-		}
-		for b := range downloadChannel {
-			fw.Write(b)
-		}
+		defer wg.Done()
+		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
+		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
 	}()
 
 	wg.Wait()
 }
 
+func handleZipAdd(zc chan []byte, zw *zip.Writer, wg *sync.WaitGroup, filename string) {
+	wg.Add(1)
+	defer func() {
+		wg.Done()
+		zw.Close()
+	}()
+	fw, zipErr := zw.Create(filename)
+	if zipErr != nil {
+		panic(zipErr)
+	}
+	for b := range zc {
+		fw.Write(b)
+	}
+}
+
 func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, key string) {
+	wg.Add(1)
 	defer func() {
 		wg.Done()
 		close(dc)
