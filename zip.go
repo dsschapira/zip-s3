@@ -145,8 +145,8 @@ func handleZipAdd(zc reflect.Value, zw *zip.Writer, wg *sync.WaitGroup, filename
 func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, key string) {
 	wg.Add(1)
 	defer func() {
-		wg.Done()
 		close(dc)
+		wg.Done()
 	}()
 	buf := bytes.NewBuffer(make([]byte, 0, 50001000))
 	fmt.Println("Downloading... ", key)
