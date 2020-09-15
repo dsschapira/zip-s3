@@ -73,50 +73,19 @@ func getObject(bucketname string, key string) (resp *s3.GetObjectOutput) {
 	return resp
 }
 
-type FakeWriterAt struct {
-	w io.Writer
-}
-
-func (fw FakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
-	return fw.w.Write(p)
-}
-
-func deleteObject(bucketname string, filename string) (resp *s3.DeleteObjectOutput) {
-	fmt.Println("Deleting... ", filename)
-	resp, err := svc.DeleteObject(&s3.DeleteObjectInput{
-		Bucket: aws.String(bucketname),
-		Key:    aws.String(filename),
-	})
-	if err != nil {
-		panic(err)
+func getFileList(objects *s3.ListObjectsV2Output) []string {
+	var fileList []string
+	for _, obj := range objects.Contents {
+		fileList = append(fileList, *obj.Key)
 	}
-
-	return resp
+	return fileList
 }
-
-// func oldMain() {
-// 	files := []string{"test1.txt", "test2.txt"}
-
-// 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
-// 	if fileErr != nil {
-// 		panic(fileErr)
-// 	}
-// 	zipWriter := zip.NewWriter(f)
-
-// 	downloadChannel := make(chan []byte)
-// 	var wg sync.WaitGroup
-// 	wg.Add(1)
-// 	func() {
-// 		defer wg.Done()
-// 		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
-// 		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
-// 	}()
-
-// 	wg.Wait()
-// }
 
 func main() {
-	files := []string{"test1.txt", "test2.txt"}
+	buckets := listBuckets()
+	bucketname := *buckets.Buckets[0].Name
+	objects := listObjects(bucketname)
+	files := getFileList(objects)
 
 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
 	if fileErr != nil {
@@ -129,15 +98,16 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		chans = make([]chan []byte, len(files))
 		for i := 0; i < len(files); i++ {
 			ch := make(chan []byte)
-			chans = append(chans, ch)
-			go handleFileDownload(ch, &wg, "zip-examples", files[i])
+			chans[i] = ch
+			go handleFileDownload(ch, &wg, bucketname, files[i])
 		}
 
 		cases := make([]reflect.SelectCase, len(chans))
-		for i, ch := range chans {
-			cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+		for j, ch := range chans {
+			cases[j] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
 		}
 		remaining := len(cases)
 		for remaining > 0 {
@@ -148,14 +118,14 @@ func main() {
 				remaining -= 1
 				continue
 			}
-			handleZipAdd(value, *zipWriter, &wg, files[chosen])
+			handleZipAdd(value, zipWriter, &wg, files[chosen])
 		}
 	}()
 
 	wg.Wait()
 }
 
-func handleZipAdd(zc reflect.Value, zw zip.Writer, wg *sync.WaitGroup, filename string) {
+func handleZipAdd(zc reflect.Value, zw *zip.Writer, wg *sync.WaitGroup, filename string) {
 	wg.Add(1)
 	defer func() {
 		wg.Done()
@@ -182,6 +152,39 @@ func handleFileDownload(dc chan []byte, wg *sync.WaitGroup, bucketname string, k
 	fmt.Printf("Write to channel %#v\n", dc)
 	dc <- buf.Bytes()
 }
+
+// Channels - Works with 1
+
+// func oldMain() {
+// 	files := []string{"test1.txt", "test2.txt"}
+
+// 	f, fileErr := os.Create("downloaded/zipped_txt_file.zip")
+// 	if fileErr != nil {
+// 		panic(fileErr)
+// 	}
+// 	zipWriter := zip.NewWriter(f)
+
+// 	downloadChannel := make(chan []byte)
+// 	var wg sync.WaitGroup
+// 	wg.Add(1)
+// 	func() {
+// 		defer wg.Done()
+// 		go handleFileDownload(downloadChannel, &wg, "zip-examples", files[0])
+// 		handleZipAdd(downloadChannel, zipWriter, &wg, files[0])
+// 	}()
+
+// 	wg.Wait()
+// }
+
+// PIPES VERSION
+
+// type FakeWriterAt struct {
+// 	w io.Writer
+// }
+
+// func (fw FakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
+// 	return fw.w.Write(p)
+// }
 
 // func main() {
 // 	pr, pw := io.Pipe()
